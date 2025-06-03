@@ -540,82 +540,326 @@ class _StepProgressIndicatorState extends State<StepProgressIndicator>
   /// Build the list of [_ProgressStep],
   /// based on number of [totalSteps]
   List<Widget> _buildSteps(double stepLength) {
-    // Build list of selected and unselected steps
-    List<Widget> selectedStepList = [];
-    List<Widget> unselectedStepList = [];
-
     // Define directions parameters
     final isLtr = widget.progressDirection == TextDirection.ltr;
     final isHorizontal = widget.direction == Axis.horizontal;
 
-    // From 0 to totalStep if TextDirection.ltr, from (totalSteps - 1) to 0 otherwise
-    int step = isLtr ? 0 : widget.totalSteps - 1;
+    // Handle gradient case
+    if (widget.selectedGradientColor != null) {
+      // Build container for gradient application
+      List<Widget> allSteps = [];
+      
+      for (int i = 0; i < widget.totalSteps; i++) {
+        final stepIndex = isLtr ? i : widget.totalSteps - 1 - i;
+        final fillFraction = _calculateStepFillFraction(i);
+        
+        // Get step size using customSize if available
+        final stepSize = widget.customSize != null
+            ? widget.customSize!(stepIndex, fillFraction > 0)
+            : fillFraction > 0
+                ? widget.selectedSize ?? widget.size
+                : widget.unselectedSize ?? widget.size;
 
-    // Add steps to the list, based on the progressDirection attribute
-    for (; isLtr ? step < widget.totalSteps : step >= 0; isLtr ? ++step : --step) {
-      // currentStep = 6, then 6 selected and 4 not selected
-      final loopStep = isLtr ? step + 1 : widget.totalSteps - step - 1;
-      final isSelectedStepColor = _isSelectedColor(loopStep);
+        Widget stepWidget = Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: isHorizontal ? widget.padding : 0,
+            vertical: !isHorizontal ? widget.padding : 0,
+          ),
+          child: ClipRRect(
+            borderRadius: _getBorderRadius(i, widget.totalSteps) ?? BorderRadius.zero,
+            child: SizedBox(
+              width: isHorizontal ? stepLength : stepSize,
+              height: !isHorizontal ? stepLength : stepSize,
+              child: Stack(
+                children: [
+                  // Background (unselected color)
+                  Container(
+                    color: widget.unselectedColor,
+                  ),
+                  // Foreground (selected portion with gradient)
+                  if (fillFraction > 0)
+                    ClipRect(
+                      child: Align(
+                        alignment: isHorizontal ? Alignment.centerLeft : Alignment.bottomCenter,
+                        widthFactor: isHorizontal ? fillFraction : 1.0,
+                        heightFactor: isHorizontal ? 1.0 : fillFraction,
+                        child: Container(
+                          width: isHorizontal ? stepLength : stepSize,
+                          height: !isHorizontal ? stepLength : stepSize,
+                          child: _buildGradientForStep(i, fillFraction, isHorizontal, isLtr, stepLength, stepSize),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
 
-      // customColor if not null, otherwise selected or unselected color
-      final stepColor = _chooseStepColor(loopStep, step);
-
-      // If defined and applicable, apply customSize or
-      // different sizes for selected and unselected
-      final stepSize = widget.customSize != null
-          ? widget.customSize!(step, isSelectedStepColor)
-          : isSelectedStepColor
-              ? widget.selectedSize ?? widget.size
-              : widget.unselectedSize ?? widget.size;
-
-      final progressStep = _ProgressStep(
-        direction: widget.direction,
-        padding: widget.padding,
-        color: stepColor,
-        width: isHorizontal ? stepLength : stepSize,
-        height: !isHorizontal ? stepLength : stepSize,
-        customStep:
-            widget.customStep != null ? widget.customStep!(step, stepColor, stepSize) : null,
-        onTap: widget.onTap != null ? widget.onTap!(step) : null,
-        isFirstStep: step == 0,
-        isLastStep: step == widget.totalSteps - 1,
-        roundedEdges: widget.roundedEdges,
-        isOnlyOneStep: _isOnlyOneStep,
-        mainAxisAlignment: widget.stepMainAxisAlignment,
-        crossAxisAlignment: widget.stepCrossAxisAlignment,
-      );
-
-      // Add to list of selected or unselected steps based on selection state
-      if (isSelectedStepColor) {
-        selectedStepList.add(progressStep);
-      } else {
-        unselectedStepList.add(progressStep);
+        allSteps.add(stepWidget);
       }
+
+      return [
+        isHorizontal
+            ? Row(children: allSteps)
+            : Column(children: allSteps),
+      ];
+    } else {
+      // No gradient - use simple approach
+      List<Widget> allSteps = [];
+      
+      for (int i = 0; i < widget.totalSteps; i++) {
+        final stepIndex = isLtr ? i : widget.totalSteps - 1 - i;
+        final fillFraction = _calculateStepFillFraction(i);
+        final isPartiallyFilled = fillFraction > 0 && fillFraction < 1;
+
+        // Get colors
+        final selectedColor = widget.customColor != null
+            ? widget.customColor!(stepIndex)
+            : widget.selectedColor;
+        final unselectedColor = widget.customColor != null
+            ? widget.customColor!(stepIndex)
+            : widget.unselectedColor;
+
+        // Get step size
+        final stepSize = widget.customSize != null
+            ? widget.customSize!(stepIndex, fillFraction > 0)
+            : fillFraction > 0
+                ? widget.selectedSize ?? widget.size
+                : widget.unselectedSize ?? widget.size;
+
+        Widget stepWidget;
+
+        if (isPartiallyFilled && widget.customStep == null) {
+          // Create a partially filled step
+          stepWidget = _buildPartialStep(
+            stepIndex: stepIndex,
+            selectedColor: selectedColor,
+            unselectedColor: unselectedColor,
+            fillFraction: fillFraction,
+            stepLength: stepLength,
+            stepSize: stepSize,
+            isHorizontal: isHorizontal,
+          );
+        } else {
+          // Create a fully filled or unfilled step
+          final color = fillFraction >= 1 ? selectedColor : unselectedColor;
+          stepWidget = _ProgressStep(
+            direction: widget.direction,
+            padding: widget.padding,
+            color: color,
+            width: isHorizontal ? stepLength : stepSize,
+            height: !isHorizontal ? stepLength : stepSize,
+            customStep: widget.customStep != null
+                ? widget.customStep!(stepIndex, color, stepSize)
+                : null,
+            onTap: widget.onTap != null ? widget.onTap!(stepIndex) : null,
+            isFirstStep: i == 0,
+            isLastStep: i == widget.totalSteps - 1,
+            roundedEdges: widget.roundedEdges,
+            isOnlyOneStep: _isOnlyOneStep,
+            mainAxisAlignment: widget.stepMainAxisAlignment,
+            crossAxisAlignment: widget.stepCrossAxisAlignment,
+          );
+        }
+
+        allSteps.add(stepWidget);
+      }
+
+      return [
+        isHorizontal
+            ? Row(children: allSteps)
+            : Column(children: allSteps),
+      ];
+    }
+  }
+
+  /// Build gradient for a specific step that maps correctly to selected range
+  Widget _buildGradientForStep(int stepIndex, double fillFraction, bool isHorizontal, bool isLtr, double stepLength, double stepSize) {
+    // Calculate total selected steps (including partial)
+    final totalSelectedSteps = _animation.value;
+    
+    if (totalSelectedSteps <= 0) return Container();
+
+    // Calculate this step's position in the gradient (0.0 to 1.0)
+    double gradientStart, gradientEnd;
+    
+    if (isLtr) {
+      gradientStart = stepIndex / totalSelectedSteps;
+      gradientEnd = (stepIndex + fillFraction) / totalSelectedSteps;
+    } else {
+      final reversedIndex = widget.totalSteps - 1 - stepIndex;
+      gradientStart = reversedIndex / totalSelectedSteps;
+      gradientEnd = (reversedIndex + fillFraction) / totalSelectedSteps;
     }
 
-    // Apply shader if gradient is not null and build a row or column based on the direction
-    return [
-      _applyShaderMask(
-        isLtr ? widget.selectedGradientColor : widget.unselectedGradientColor,
-        widget.direction == Axis.horizontal
-            ? Row(
-                children: isLtr ? selectedStepList : unselectedStepList,
-              )
-            : Column(
-                children: isLtr ? selectedStepList : unselectedStepList,
-              ),
+    // Clamp values
+    gradientStart = gradientStart.clamp(0.0, 1.0);
+    gradientEnd = gradientEnd.clamp(0.0, 1.0);
+
+    // Create a custom gradient that shows only this step's portion
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: isHorizontal ? Alignment.centerLeft : Alignment.topCenter,
+          end: isHorizontal ? Alignment.centerRight : Alignment.bottomCenter,
+          colors: _interpolateGradientColors(widget.selectedGradientColor!, gradientStart, gradientEnd),
+          stops: [0.0, 1.0],
+        ),
       ),
-      _applyShaderMask(
-        !isLtr ? widget.selectedGradientColor : widget.unselectedGradientColor,
-        widget.direction == Axis.horizontal
-            ? Row(
-                children: !isLtr ? selectedStepList : unselectedStepList,
-              )
-            : Column(
-                children: !isLtr ? selectedStepList : unselectedStepList,
-              ),
+    );
+  }
+
+  /// Interpolate gradient colors for a specific range
+  List<Color> _interpolateGradientColors(Gradient gradient, double start, double end) {
+    if (gradient is LinearGradient) {
+      final colors = gradient.colors;
+      final stops = gradient.stops ?? List.generate(colors.length, (i) => i / (colors.length - 1));
+      
+      // Find colors at start and end positions
+      Color startColor = _getColorAtPosition(colors, stops, start);
+      Color endColor = _getColorAtPosition(colors, stops, end);
+      
+      return [startColor, endColor];
+    }
+    
+    // Fallback for other gradient types
+    return [widget.selectedColor, widget.selectedColor];
+  }
+
+  /// Get interpolated color at a specific position in gradient
+  Color _getColorAtPosition(List<Color> colors, List<double> stops, double position) {
+    // Find the two stops that surround the position
+    for (int i = 0; i < stops.length - 1; i++) {
+      if (position >= stops[i] && position <= stops[i + 1]) {
+        // Interpolate between these two colors
+        final localPosition = (position - stops[i]) / (stops[i + 1] - stops[i]);
+        return Color.lerp(colors[i], colors[i + 1], localPosition)!;
+      }
+    }
+    
+    // Edge cases
+    if (position <= stops.first) return colors.first;
+    if (position >= stops.last) return colors.last;
+    
+    return colors.first;
+  }
+
+  /// Build a partially filled step
+  Widget _buildPartialStep({
+    required int stepIndex,
+    required Color selectedColor,
+    required Color unselectedColor,
+    required double fillFraction,
+    required double stepLength,
+    required double stepSize,
+    required bool isHorizontal,
+  }) {
+    Widget content = Stack(
+      children: [
+        // Unselected background
+        Container(
+          width: isHorizontal ? stepLength : stepSize,
+          height: !isHorizontal ? stepLength : stepSize,
+          color: unselectedColor,
+        ),
+        // Selected foreground
+        ClipRect(
+          child: Align(
+            alignment: isHorizontal ? Alignment.centerLeft : Alignment.bottomCenter,
+            widthFactor: isHorizontal ? fillFraction : 1.0,
+            heightFactor: isHorizontal ? 1.0 : fillFraction,
+            child: Container(
+              width: isHorizontal ? stepLength : stepSize,
+              height: !isHorizontal ? stepLength : stepSize,
+              color: selectedColor,
+            ),
+          ),
+        ),
+      ],
+    );
+
+    // Wrap with padding and rounded edges if needed
+    return Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: widget.direction == Axis.horizontal ? widget.padding : 0.0,
+        vertical: widget.direction == Axis.vertical ? widget.padding : 0.0,
       ),
-    ];
+      child: (stepIndex == 0 || stepIndex == widget.totalSteps - 1) && 
+              widget.roundedEdges != null
+          ? ClipRRect(
+              borderRadius: _getBorderRadius(stepIndex, widget.totalSteps) ?? BorderRadius.zero,
+              child: content,
+            )
+          : content,
+    );
+  }
+
+  /// Get border radius for a step
+  BorderRadius? _getBorderRadius(int stepIndex, int totalSteps) {
+    if (widget.roundedEdges == null) return null;
+    
+    final isFirst = stepIndex == 0;
+    final isLast = stepIndex == totalSteps - 1;
+    final isOnly = totalSteps == 1;
+    
+    if (widget.direction == Axis.horizontal) {
+      if (isOnly) {
+        return BorderRadius.all(widget.roundedEdges!);
+      } else if (isFirst) {
+        return BorderRadius.only(
+          topLeft: widget.roundedEdges!,
+          bottomLeft: widget.roundedEdges!,
+        );
+      } else if (isLast) {
+        return BorderRadius.only(
+          topRight: widget.roundedEdges!,
+          bottomRight: widget.roundedEdges!,
+        );
+      }
+    } else {
+      if (isOnly) {
+        return BorderRadius.all(widget.roundedEdges!);
+      } else if (isFirst) {
+        return BorderRadius.only(
+          topLeft: widget.roundedEdges!,
+          topRight: widget.roundedEdges!,
+        );
+      } else if (isLast) {
+        return BorderRadius.only(
+          bottomLeft: widget.roundedEdges!,
+          bottomRight: widget.roundedEdges!,
+        );
+      }
+    }
+    
+    return null;
+  }
+
+  /// Calculate how much of a step should be filled (0.0 to 1.0)
+  double _calculateStepFillFraction(int stepIndex) {
+    final isLtr = widget.progressDirection == TextDirection.ltr;
+    final animValue = _animation.value;
+    
+    if (isLtr) {
+      if (stepIndex < animValue.floor()) {
+        return 1.0; // Fully filled
+      } else if (stepIndex == animValue.floor()) {
+        return animValue - animValue.floor(); // Partially filled
+      } else {
+        return 0.0; // Not filled
+      }
+    } else {
+      // RTL logic
+      final reversedIndex = widget.totalSteps - 1 - stepIndex;
+      if (reversedIndex < animValue.floor()) {
+        return 1.0; // Fully filled
+      } else if (reversedIndex == animValue.floor()) {
+        return animValue - animValue.floor(); // Partially filled
+      } else {
+        return 0.0; // Not filled
+      }
+    }
   }
 }
 
