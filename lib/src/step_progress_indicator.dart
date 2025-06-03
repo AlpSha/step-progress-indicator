@@ -256,12 +256,15 @@ class _StepProgressIndicatorState extends State<StepProgressIndicator>
       vsync: this,
     );
     _animation = Tween<double>(
-      begin: widget.currentStep.toDouble(),
+      begin: 0.0,
       end: widget.currentStep.toDouble(),
     ).animate(CurvedAnimation(
       parent: _animationController,
       curve: widget.animationCurve,
     ));
+    
+    // Start the initial animation
+    _animationController.forward();
   }
 
   @override
